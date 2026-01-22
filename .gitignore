@@ -1,0 +1,22 @@
+# Build directory
+build/
+
+# Generated config (may contain credentials)
+sdkconfig
+sdkconfig.old
+
+# Logs and temporary files
+*.log
+*.txt
+!README.txt
+
+# Windows
+nul
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Local settings
+.claude/

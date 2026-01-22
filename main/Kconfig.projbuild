@@ -1,0 +1,102 @@
+menu "Presence Detector Configuration"
+
+    menu "WiFi Configuration"
+        config WIFI_SSID
+            string "WiFi SSID"
+            default "MEO-D53AD0"
+            help
+                SSID (network name) to connect to.
+
+        config WIFI_PASSWORD
+            string "WiFi Password"
+            default "68638fc18d"
+            help
+                WiFi password (WPA or WPA2).
+    endmenu
+
+    menu "MQTT Configuration"
+        config MQTT_BROKER_URI
+            string "MQTT Broker URI"
+            default "mqtt://192.168.1.92:1883"
+            help
+                URI of the MQTT broker (e.g., mqtt://192.168.1.92:1883)
+
+        config MQTT_USERNAME
+            string "MQTT Username"
+            default "mqttuser"
+            help
+                Username for MQTT broker authentication.
+
+        config MQTT_PASSWORD
+            string "MQTT Password"
+            default "mqttpassword"
+            help
+                Password for MQTT broker authentication.
+
+        config MQTT_TOPIC_SCAN_REQUEST
+            string "MQTT Topic - Scan Request"
+            default "home/presence/scan/request"
+            help
+                Topic to subscribe for scan trigger requests.
+
+        config MQTT_TOPIC_PRESENCE_BASE
+            string "MQTT Topic - Presence Base"
+            default "home/presence"
+            help
+                Base topic for presence state publishing.
+    endmenu
+
+    menu "Bluetooth Devices"
+        config BT_DEVICE1_MAC
+            string "Device 1 MAC Address"
+            default "A4:75:B9:53:F7:ED"
+            help
+                Bluetooth MAC address of device 1 (format: AA:BB:CC:DD:EE:FF)
+
+        config BT_DEVICE1_NAME
+            string "Device 1 Name"
+            default "cristina_phone"
+            help
+                Friendly name for device 1 (used in MQTT topic)
+
+        config BT_DEVICE2_MAC
+            string "Device 2 MAC Address"
+            default "9C:83:06:7B:27:17"
+            help
+                Bluetooth MAC address of device 2 (format: AA:BB:CC:DD:EE:FF)
+
+        config BT_DEVICE2_NAME
+            string "Device 2 Name"
+            default "marco_phone"
+            help
+                Friendly name for device 2 (used in MQTT topic)
+    endmenu
+
+    menu "Presence Detection Settings"
+        config BT_PROBE_TIMEOUT_MS
+            int "Probe Timeout (ms)"
+            default 8000
+            help
+                Timeout for SDP probe in milliseconds.
+
+        config BT_INTER_DEVICE_DELAY_MS
+            int "Inter-device Delay (ms)"
+            default 300
+            help
+                Delay between probing different devices.
+
+        config BT_MIN_SCAN_INTERVAL_MS
+            int "Minimum Scan Interval (ms)"
+            default 2000
+            help
+                Minimum interval between scan cycles.
+
+        config BT_PAIRING_MODE
+            bool "Enable Pairing Mode"
+            default n
+            help
+                Enable pairing mode to discover and bond with phones.
+                Disable after pairing is complete.
+    endmenu
+
+endmenu
