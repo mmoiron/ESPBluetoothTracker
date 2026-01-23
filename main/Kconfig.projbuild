@@ -46,44 +46,6 @@ menu "Presence Detector Configuration"
                 Base topic for presence state publishing.
     endmenu
 
-    menu "Bluetooth Devices"
-        config BT_DEVICE1_MAC
-            string "Device 1 MAC Address"
-            default "00:00:00:00:00:00"
-            help
-                Bluetooth MAC address of device 1 (format: AA:BB:CC:DD:EE:FF)
-
-        config BT_DEVICE1_NAME
-            string "Device 1 Name"
-            default "phone_1"
-            help
-                Friendly name for device 1 (used in MQTT topic)
-
-        config BT_DEVICE2_MAC
-            string "Device 2 MAC Address"
-            default "00:00:00:00:00:00"
-            help
-                Bluetooth MAC address of device 2 (format: AA:BB:CC:DD:EE:FF)
-
-        config BT_DEVICE2_NAME
-            string "Device 2 Name"
-            default "phone_2"
-            help
-                Friendly name for device 2 (used in MQTT topic)
-
-        config BT_DEVICE3_MAC
-            string "Device 3 MAC Address"
-            default "00:00:00:00:00:00"
-            help
-                Bluetooth MAC address of device 3 (format: AA:BB:CC:DD:EE:FF)
-
-        config BT_DEVICE3_NAME
-            string "Device 3 Name"
-            default "phone_3"
-            help
-                Friendly name for device 3 (used in MQTT topic)
-    endmenu
-
     menu "Presence Detection Settings"
         config BT_PROBE_TIMEOUT_MS
             int "Probe Timeout (ms)"

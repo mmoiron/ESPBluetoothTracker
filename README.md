@@ -262,6 +262,15 @@ flash_project.bat
 idf.py -p COM3 monitor
 ```
 
+**Serial settings** (for PuTTY or other terminals):
+- Baud rate: 115200
+- Data bits: 8
+- Parity: None
+- Stop bits: 1
+- Flow control: None
+
+To exit ESP-IDF monitor: `Ctrl+]`
+
 ## Configuration
 
 Default configuration is set via `menuconfig`. Runtime changes via MQTT are persisted in NVS.

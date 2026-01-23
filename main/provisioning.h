@@ -9,6 +9,7 @@
 #define PROV_MQTT_URI_MAX_LEN 128
 #define PROV_MQTT_USER_MAX_LEN 32
 #define PROV_MQTT_PASS_MAX_LEN 64
+#define PROV_IP_MAX_LEN 16
 
 /**
  * @brief Provisioning configuration structure
@@ -19,6 +20,11 @@ typedef struct {
     char mqtt_uri[PROV_MQTT_URI_MAX_LEN];
     char mqtt_username[PROV_MQTT_USER_MAX_LEN];
     char mqtt_password[PROV_MQTT_PASS_MAX_LEN];
+    bool use_static_ip;
+    char static_ip[PROV_IP_MAX_LEN];
+    char gateway[PROV_IP_MAX_LEN];
+    char subnet[PROV_IP_MAX_LEN];
+    char dns[PROV_IP_MAX_LEN];
     bool configured;
 } prov_config_t;
 

@@ -1,5 +1,4 @@
 #include "bt_presence.h"
-#include "provisioning.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
@@ -233,35 +232,8 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
     // Load configuration from NVS
     bt_presence_load_config();
 
-    // If no devices loaded from NVS, try to load from Kconfig defaults
-    // (unless skip_defaults flag is set from factory reset)
-    if (bt_presence_get_device_count() == 0 && !prov_should_skip_defaults()) {
-        ESP_LOGI(TAG, "No devices in NVS, loading from Kconfig defaults...");
-
-        #ifdef CONFIG_BT_DEVICE1_MAC
-        if (strlen(CONFIG_BT_DEVICE1_MAC) > 0 && strcmp(CONFIG_BT_DEVICE1_MAC, "00:00:00:00:00:00") != 0) {
-            bt_presence_add_device(CONFIG_BT_DEVICE1_MAC, CONFIG_BT_DEVICE1_NAME);
-        }
-        #endif
-
-        #ifdef CONFIG_BT_DEVICE2_MAC
-        if (strlen(CONFIG_BT_DEVICE2_MAC) > 0 && strcmp(CONFIG_BT_DEVICE2_MAC, "00:00:00:00:00:00") != 0) {
-            bt_presence_add_device(CONFIG_BT_DEVICE2_MAC, CONFIG_BT_DEVICE2_NAME);
-        }
-        #endif
-
-        #ifdef CONFIG_BT_DEVICE3_MAC
-        if (strlen(CONFIG_BT_DEVICE3_MAC) > 0 && strcmp(CONFIG_BT_DEVICE3_MAC, "00:00:00:00:00:00") != 0) {
-            bt_presence_add_device(CONFIG_BT_DEVICE3_MAC, CONFIG_BT_DEVICE3_NAME);
-        }
-        #endif
-
-        // Save loaded defaults to NVS
-        if (bt_presence_get_device_count() > 0) {
-            bt_presence_save_config();
-        }
-    } else if (bt_presence_get_device_count() == 0) {
-        ESP_LOGI(TAG, "Factory reset - starting with empty device list");
+    if (bt_presence_get_device_count() == 0) {
+        ESP_LOGI(TAG, "No devices configured - add via MQTT");
     }
 
     ESP_LOGI(TAG, "Bluetooth initialized with %d device(s)", bt_presence_get_device_count());

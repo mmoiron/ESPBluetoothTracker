@@ -34,38 +34,59 @@ static const char PROV_HTML_PAGE[] =
 ".container{max-width:400px;margin:0 auto;}"
 "form{background:#16213e;padding:25px;border-radius:10px;}"
 "label{display:block;margin-bottom:5px;color:#00d4ff;}"
-"input{width:100%;padding:12px;margin-bottom:15px;border:1px solid #333;"
+"input[type=text],input[type=password]{width:100%;padding:12px;margin-bottom:15px;border:1px solid #333;"
 "border-radius:5px;background:#0f3460;color:#fff;box-sizing:border-box;}"
 "input:focus{border-color:#00d4ff;outline:none;}"
+"input[type=checkbox]{width:auto;margin-right:10px;}"
+".checkbox-label{display:flex;align-items:center;margin-bottom:15px;color:#aaa;}"
 "button{width:100%;padding:15px;background:#00d4ff;color:#1a1a2e;"
 "border:none;border-radius:5px;font-size:16px;font-weight:bold;cursor:pointer;}"
 "button:hover{background:#00b4d8;}"
 ".section{margin-bottom:20px;padding-bottom:15px;border-bottom:1px solid #333;}"
 ".section:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0;}"
+".section h3{color:#00d4ff;font-size:14px;margin:0 0 15px 0;}"
 ".info{font-size:12px;color:#666;margin-top:20px;text-align:center;}"
+".static-ip-fields{display:none;}"
+".static-ip-fields.show{display:block;}"
 "</style></head><body>"
 "<div class='container'>"
 "<h1>ESP32 Presence Detector</h1>"
 "<h2>Initial Setup</h2>"
 "<form action='/save' method='POST'>"
 "<div class='section'>"
-"<label>WiFi Network Name (SSID)</label>"
+"<h3>WiFi Settings</h3>"
+"<label>Network Name (SSID)</label>"
 "<input type='text' name='ssid' required maxlength='31'>"
-"<label>WiFi Password</label>"
+"<label>Password</label>"
 "<input type='password' name='wifi_pass' maxlength='63'>"
+"<label class='checkbox-label'><input type='checkbox' name='static_ip' id='static_ip' value='1' onchange='toggleStaticIP()'>Use Static IP</label>"
+"<div id='static_fields' class='static-ip-fields'>"
+"<label>IP Address</label>"
+"<input type='text' name='ipaddr' placeholder='192.168.1.100' maxlength='15'>"
+"<label>Gateway</label>"
+"<input type='text' name='gateway' placeholder='192.168.1.1' maxlength='15'>"
+"<label>Subnet Mask</label>"
+"<input type='text' name='subnet' placeholder='255.255.255.0' maxlength='15'>"
+"<label>DNS Server</label>"
+"<input type='text' name='dns' placeholder='8.8.8.8' maxlength='15'>"
+"</div>"
 "</div>"
 "<div class='section'>"
-"<label>MQTT Broker URI</label>"
+"<h3>MQTT Settings</h3>"
+"<label>Broker URI</label>"
 "<input type='text' name='mqtt_uri' placeholder='mqtt://192.168.1.1:1883' required maxlength='127'>"
-"<label>MQTT Username</label>"
+"<label>Username</label>"
 "<input type='text' name='mqtt_user' maxlength='31'>"
-"<label>MQTT Password</label>"
+"<label>Password</label>"
 "<input type='password' name='mqtt_pass' maxlength='63'>"
 "</div>"
 "<button type='submit'>Save &amp; Connect</button>"
 "</form>"
 "<p class='info'>After saving, the device will restart and connect to your network.</p>"
-"</div></body></html>";
+"</div>"
+"<script>function toggleStaticIP(){var c=document.getElementById('static_ip').checked;"
+"document.getElementById('static_fields').className=c?'static-ip-fields show':'static-ip-fields';}</script>"
+"</body></html>";
 
 static const char PROV_SUCCESS_HTML[] =
 "<!DOCTYPE html>"
@@ -129,13 +150,35 @@ esp_err_t prov_load_config(prov_config_t *config)
     len = sizeof(config->mqtt_password);
     nvs_get_str(nvs, "mqtt_pass", config->mqtt_password, &len);
 
+    // Load static IP settings
+    uint8_t use_static = 0;
+    nvs_get_u8(nvs, "use_static", &use_static);
+    config->use_static_ip = (use_static == 1);
+
+    len = sizeof(config->static_ip);
+    nvs_get_str(nvs, "ip_addr", config->static_ip, &len);
+
+    len = sizeof(config->gateway);
+    nvs_get_str(nvs, "gateway", config->gateway, &len);
+
+    len = sizeof(config->subnet);
+    nvs_get_str(nvs, "subnet", config->subnet, &len);
+
+    len = sizeof(config->dns);
+    nvs_get_str(nvs, "dns", config->dns, &len);
+
     uint8_t configured = 0;
     nvs_get_u8(nvs, "configured", &configured);
     config->configured = (configured == 1);
 
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "Loaded config: SSID=%s, MQTT=%s", config->wifi_ssid, config->mqtt_uri);
+    if (config->use_static_ip) {
+        ESP_LOGI(TAG, "Loaded config: SSID=%s, MQTT=%s, Static IP=%s",
+                 config->wifi_ssid, config->mqtt_uri, config->static_ip);
+    } else {
+        ESP_LOGI(TAG, "Loaded config: SSID=%s, MQTT=%s, DHCP", config->wifi_ssid, config->mqtt_uri);
+    }
     return ESP_OK;
 }
 
@@ -157,6 +200,14 @@ esp_err_t prov_save_config(const prov_config_t *config)
     nvs_set_str(nvs, "mqtt_uri", config->mqtt_uri);
     nvs_set_str(nvs, "mqtt_user", config->mqtt_username);
     nvs_set_str(nvs, "mqtt_pass", config->mqtt_password);
+
+    // Save static IP settings (always save all keys to clear old data)
+    nvs_set_u8(nvs, "use_static", config->use_static_ip ? 1 : 0);
+    nvs_set_str(nvs, "ip_addr", config->use_static_ip ? config->static_ip : "");
+    nvs_set_str(nvs, "gateway", config->use_static_ip ? config->gateway : "");
+    nvs_set_str(nvs, "subnet", config->use_static_ip ? config->subnet : "");
+    nvs_set_str(nvs, "dns", config->use_static_ip ? config->dns : "");
+
     nvs_set_u8(nvs, "configured", 1);
 
     // Clear force_prov flag since provisioning is now complete
@@ -165,7 +216,12 @@ esp_err_t prov_save_config(const prov_config_t *config)
     ret = nvs_commit(nvs);
     nvs_close(nvs);
 
-    ESP_LOGI(TAG, "Config saved: SSID=%s, MQTT=%s", config->wifi_ssid, config->mqtt_uri);
+    if (config->use_static_ip) {
+        ESP_LOGI(TAG, "Config saved: SSID=%s, MQTT=%s, Static IP=%s",
+                 config->wifi_ssid, config->mqtt_uri, config->static_ip);
+    } else {
+        ESP_LOGI(TAG, "Config saved: SSID=%s, MQTT=%s, DHCP", config->wifi_ssid, config->mqtt_uri);
+    }
     return ret;
 }
 
@@ -355,9 +411,42 @@ static esp_err_t save_handler(httpd_req_t *req)
     parse_form_field(buf, "mqtt_user", config.mqtt_username, sizeof(config.mqtt_username));
     parse_form_field(buf, "mqtt_pass", config.mqtt_password, sizeof(config.mqtt_password));
 
+    // Parse static IP fields
+    char static_ip_enabled[8] = {0};
+    parse_form_field(buf, "static_ip", static_ip_enabled, sizeof(static_ip_enabled));
+    config.use_static_ip = (strcmp(static_ip_enabled, "1") == 0);
+
+    if (config.use_static_ip) {
+        parse_form_field(buf, "ipaddr", config.static_ip, sizeof(config.static_ip));
+        parse_form_field(buf, "gateway", config.gateway, sizeof(config.gateway));
+        parse_form_field(buf, "subnet", config.subnet, sizeof(config.subnet));
+        parse_form_field(buf, "dns", config.dns, sizeof(config.dns));
+
+        // Set defaults if not provided
+        if (strlen(config.subnet) == 0) {
+            strncpy(config.subnet, "255.255.255.0", sizeof(config.subnet));
+        }
+        if (strlen(config.dns) == 0) {
+            strncpy(config.dns, "8.8.8.8", sizeof(config.dns));
+        }
+    }
+
     if (strlen(config.wifi_ssid) == 0 || strlen(config.mqtt_uri) == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SSID and MQTT URI are required");
         return ESP_FAIL;
+    }
+
+    if (config.use_static_ip && (strlen(config.static_ip) == 0 || strlen(config.gateway) == 0)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Static IP requires IP address and gateway");
+        return ESP_FAIL;
+    }
+
+    // Debug log for static IP config
+    if (config.use_static_ip) {
+        ESP_LOGI(TAG, "Static IP parsed: IP=%s, GW=%s, Subnet=%s, DNS=%s",
+                 config.static_ip, config.gateway, config.subnet, config.dns);
+    } else {
+        ESP_LOGI(TAG, "Using DHCP (no static IP)");
     }
 
     config.configured = true;
