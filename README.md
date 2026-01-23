@@ -15,6 +15,29 @@ Detects the presence of Bluetooth Classic devices (phones) using ESP32 and publi
 - Support for multiple ESP32 devices in the same network
 - Factory reset via BOOT button (hold 5 seconds)
 
+## Security Notice
+
+**This is a personal/hobby project designed for use on a trusted home network. No security hardening has been implemented.**
+
+Known security limitations:
+
+- **No TLS/SSL support** - MQTT connections use plain text (`mqtt://`), not encrypted (`mqtts://`)
+- **Provisioning portal uses HTTP** - WiFi and MQTT credentials are transmitted unencrypted during setup
+- **Open WiFi AP during provisioning** - The setup access point has no password protection
+- **Credentials stored unencrypted** - WiFi/MQTT passwords are stored in NVS without encryption
+- **No MQTT authentication enforcement** - Any device on the network can publish commands to control the ESP32
+- **No input validation** - MQTT payloads are not sanitized (potential buffer overflow risks)
+- **Legacy Bluetooth pairing** - Uses simple pairing without Secure Simple Pairing (SSP)
+- **MAC addresses exposed** - Device MAC addresses are visible in MQTT topics
+
+**Recommendations if deploying in a less trusted environment:**
+- Use a dedicated IoT VLAN with firewall rules
+- Configure MQTT broker ACLs to restrict topic access
+- Use MQTT broker authentication
+- Consider this device as untrusted and isolate accordingly
+
+**USE AT YOUR OWN RISK. The author accepts no responsibility for security incidents arising from the use of this code.**
+
 ## MQTT Topics
 
 All topics use the prefix: `home/presence/<ESP32_MAC>/`
