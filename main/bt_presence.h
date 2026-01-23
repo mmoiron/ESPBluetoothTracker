@@ -69,6 +69,14 @@ esp_err_t bt_parse_mac(const char *mac_str, uint8_t *mac_bytes);
 esp_err_t bt_get_local_mac(char *mac_str);
 
 /**
+ * @brief Get the Bluetooth device name (unique per ESP32)
+ *
+ * @param name_str Output buffer for name string (at least 32 bytes)
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t bt_get_device_name(char *name_str);
+
+/**
  * @brief Add a device to the tracking list
  *
  * @param mac_str MAC address string

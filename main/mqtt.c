@@ -1,4 +1,5 @@
 #include "mqtt.h"
+#include "provisioning.h"
 #include "mqtt_client.h"
 #include "esp_log.h"
 #include <string.h>
@@ -19,6 +20,8 @@ static char s_topic_config_add[128] = {0};
 static char s_topic_config_remove[128] = {0};
 static char s_topic_config_list[128] = {0};
 static char s_topic_pairing_set[128] = {0};
+static char s_topic_reprovision[128] = {0};
+static char s_topic_factory_reset[128] = {0};
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data)
@@ -39,6 +42,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             esp_mqtt_client_subscribe(s_mqtt_client, s_topic_config_remove, 1);
             esp_mqtt_client_subscribe(s_mqtt_client, s_topic_config_list, 1);
             esp_mqtt_client_subscribe(s_mqtt_client, s_topic_pairing_set, 1);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_reprovision, 1);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_factory_reset, 1);
             ESP_LOGI(TAG, "Subscribed to config topics");
             break;
 
@@ -106,6 +111,20 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                     s_config_callback("pairing", data, "");
                 }
             }
+            // Check if it's a reprovision command
+            else if (strcmp(topic, s_topic_reprovision) == 0) {
+                ESP_LOGW(TAG, "Reprovision command received!");
+                if (s_config_callback) {
+                    s_config_callback("reprovision", "", "");
+                }
+            }
+            // Check if it's a factory reset command
+            else if (strcmp(topic, s_topic_factory_reset) == 0) {
+                ESP_LOGW(TAG, "Factory reset command received!");
+                if (s_config_callback) {
+                    s_config_callback("factory_reset", "", "");
+                }
+            }
             break;
         }
 
@@ -149,16 +168,28 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
     snprintf(s_topic_config_remove, sizeof(s_topic_config_remove), "%s/config/remove", s_topic_prefix);
     snprintf(s_topic_config_list, sizeof(s_topic_config_list), "%s/config/list", s_topic_prefix);
     snprintf(s_topic_pairing_set, sizeof(s_topic_pairing_set), "%s/pairing/set", s_topic_prefix);
+    snprintf(s_topic_reprovision, sizeof(s_topic_reprovision), "%s/system/reprovision", s_topic_prefix);
+    snprintf(s_topic_factory_reset, sizeof(s_topic_factory_reset), "%s/system/factory_reset", s_topic_prefix);
 
     ESP_LOGI(TAG, "Topic prefix: %s", s_topic_prefix);
 
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = CONFIG_MQTT_BROKER_URI,
-        .credentials.username = CONFIG_MQTT_USERNAME,
-        .credentials.authentication.password = CONFIG_MQTT_PASSWORD,
-    };
+    // Load MQTT config - check provisioning first, then fallback to Kconfig
+    esp_mqtt_client_config_t mqtt_cfg = {0};
 
-    ESP_LOGI(TAG, "Connecting to MQTT broker: %s", CONFIG_MQTT_BROKER_URI);
+    prov_config_t prov_config;
+    if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
+        ESP_LOGI(TAG, "Using provisioned MQTT config");
+        mqtt_cfg.broker.address.uri = prov_config.mqtt_uri;
+        mqtt_cfg.credentials.username = prov_config.mqtt_username;
+        mqtt_cfg.credentials.authentication.password = prov_config.mqtt_password;
+        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", prov_config.mqtt_uri);
+    } else {
+        ESP_LOGI(TAG, "Using Kconfig default MQTT config");
+        mqtt_cfg.broker.address.uri = CONFIG_MQTT_BROKER_URI;
+        mqtt_cfg.credentials.username = CONFIG_MQTT_USERNAME;
+        mqtt_cfg.credentials.authentication.password = CONFIG_MQTT_PASSWORD;
+        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", CONFIG_MQTT_BROKER_URI);
+    }
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     if (s_mqtt_client == NULL) {

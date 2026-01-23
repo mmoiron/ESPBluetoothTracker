@@ -1,4 +1,5 @@
 #include "bt_presence.h"
+#include "provisioning.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_bt_device.h"
@@ -58,6 +59,16 @@ esp_err_t bt_get_local_mac(char *mac_str)
         return ESP_ERR_INVALID_ARG;
     }
     strncpy(mac_str, s_local_mac, 18);
+    return ESP_OK;
+}
+
+esp_err_t bt_get_device_name(char *name_str)
+{
+    if (name_str == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    snprintf(name_str, 32, "ESP32_Presence_%c%c%c%c",
+             s_local_mac[12], s_local_mac[13], s_local_mac[15], s_local_mac[16]);
     return ESP_OK;
 }
 
@@ -207,8 +218,12 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
         return ret;
     }
 
-    // Set device name
-    esp_bt_gap_set_device_name("ESP32_Presence");
+    // Set unique device name using last 4 chars of MAC
+    char device_name[32];
+    snprintf(device_name, sizeof(device_name), "ESP32_Presence_%c%c%c%c",
+             s_local_mac[12], s_local_mac[13], s_local_mac[15], s_local_mac[16]);
+    esp_bt_gap_set_device_name(device_name);
+    ESP_LOGI(TAG, "Bluetooth device name: %s", device_name);
 
     // Set SSP (Secure Simple Pairing) mode
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
@@ -219,7 +234,8 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
     bt_presence_load_config();
 
     // If no devices loaded from NVS, try to load from Kconfig defaults
-    if (bt_presence_get_device_count() == 0) {
+    // (unless skip_defaults flag is set from factory reset)
+    if (bt_presence_get_device_count() == 0 && !prov_should_skip_defaults()) {
         ESP_LOGI(TAG, "No devices in NVS, loading from Kconfig defaults...");
 
         #ifdef CONFIG_BT_DEVICE1_MAC
@@ -244,6 +260,8 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
         if (bt_presence_get_device_count() > 0) {
             bt_presence_save_config();
         }
+    } else if (bt_presence_get_device_count() == 0) {
+        ESP_LOGI(TAG, "Factory reset - starting with empty device list");
     }
 
     ESP_LOGI(TAG, "Bluetooth initialized with %d device(s)", bt_presence_get_device_count());
@@ -509,7 +527,11 @@ esp_err_t bt_presence_enable_pairing(void)
 {
     ESP_LOGI(TAG, "Enabling pairing mode...");
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-    ESP_LOGI(TAG, "ESP32 is now discoverable as 'ESP32_Presence'");
+    // Show the unique device name
+    char device_name[32];
+    snprintf(device_name, sizeof(device_name), "ESP32_Presence_%c%c%c%c",
+             s_local_mac[12], s_local_mac[13], s_local_mac[15], s_local_mac[16]);
+    ESP_LOGI(TAG, "ESP32 is now discoverable as '%s'", device_name);
     esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 30, 0);
     return ESP_OK;
 }

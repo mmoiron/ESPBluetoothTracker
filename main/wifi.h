@@ -18,4 +18,12 @@ esp_err_t wifi_init_sta(void);
  */
 bool wifi_is_connected(void);
 
+/**
+ * @brief Get current WiFi SSID
+ *
+ * @param ssid Buffer to store SSID
+ * @param len Buffer size
+ */
+void wifi_get_ssid(char *ssid, size_t len);
+
 #endif // WIFI_H

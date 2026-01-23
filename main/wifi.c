@@ -1,4 +1,5 @@
 #include "wifi.h"
+#include "provisioning.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -75,19 +76,29 @@ esp_err_t wifi_init_sta(void)
                                                         NULL,
                                                         &instance_got_ip));
 
+    // Load WiFi credentials - check provisioning first, then fallback to Kconfig
     wifi_config_t wifi_config = {
         .sta = {
-            .ssid = CONFIG_WIFI_SSID,
-            .password = CONFIG_WIFI_PASSWORD,
             .threshold.authmode = WIFI_AUTH_WPA2_PSK,
         },
     };
+
+    prov_config_t prov_config;
+    if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
+        ESP_LOGI(TAG, "Using provisioned WiFi config");
+        strncpy((char *)wifi_config.sta.ssid, prov_config.wifi_ssid, sizeof(wifi_config.sta.ssid));
+        strncpy((char *)wifi_config.sta.password, prov_config.wifi_password, sizeof(wifi_config.sta.password));
+    } else {
+        ESP_LOGI(TAG, "Using Kconfig default WiFi config");
+        strncpy((char *)wifi_config.sta.ssid, CONFIG_WIFI_SSID, sizeof(wifi_config.sta.ssid));
+        strncpy((char *)wifi_config.sta.password, CONFIG_WIFI_PASSWORD, sizeof(wifi_config.sta.password));
+    }
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    ESP_LOGI(TAG, "WiFi init complete, connecting to %s...", CONFIG_WIFI_SSID);
+    ESP_LOGI(TAG, "WiFi init complete, connecting to %s...", wifi_config.sta.ssid);
 
     // Wait for connection
     EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
@@ -97,10 +108,10 @@ esp_err_t wifi_init_sta(void)
                                            portMAX_DELAY);
 
     if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGI(TAG, "Connected to SSID: %s", CONFIG_WIFI_SSID);
+        ESP_LOGI(TAG, "Connected to SSID: %s", wifi_config.sta.ssid);
         return ESP_OK;
     } else if (bits & WIFI_FAIL_BIT) {
-        ESP_LOGE(TAG, "Failed to connect to SSID: %s", CONFIG_WIFI_SSID);
+        ESP_LOGE(TAG, "Failed to connect to SSID: %s", wifi_config.sta.ssid);
         return ESP_FAIL;
     }
 
@@ -110,4 +121,14 @@ esp_err_t wifi_init_sta(void)
 bool wifi_is_connected(void)
 {
     return s_is_connected;
+}
+
+void wifi_get_ssid(char *ssid, size_t len)
+{
+    prov_config_t prov_config;
+    if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
+        strncpy(ssid, prov_config.wifi_ssid, len);
+    } else {
+        strncpy(ssid, CONFIG_WIFI_SSID, len);
+    }
 }
