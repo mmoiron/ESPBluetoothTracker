@@ -70,6 +70,18 @@ menu "Presence Detector Configuration"
             default "marco_phone"
             help
                 Friendly name for device 2 (used in MQTT topic)
+
+        config BT_DEVICE3_MAC
+            string "Device 3 MAC Address"
+            default "00:00:00:00:00:00"
+            help
+                Bluetooth MAC address of device 3 (format: AA:BB:CC:DD:EE:FF)
+
+        config BT_DEVICE3_NAME
+            string "Device 3 Name"
+            default "salvador_phone"
+            help
+                Friendly name for device 3 (used in MQTT topic)
     endmenu
 
     menu "Presence Detection Settings"

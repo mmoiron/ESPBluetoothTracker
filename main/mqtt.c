@@ -3,14 +3,22 @@
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
-#include <time.h>
-#include <sys/time.h>
 
 static const char *TAG = "MQTT";
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_is_connected = false;
 static mqtt_scan_request_cb_t s_scan_callback = NULL;
+static mqtt_config_cb_t s_config_callback = NULL;
+static char s_esp32_mac[18] = {0};  // MAC address string "XX:XX:XX:XX:XX:XX"
+static char s_topic_prefix[64] = {0};  // "home/presence/XXXXXXXXXXXX"
+
+// Topic suffixes
+static char s_topic_scan_request[128] = {0};
+static char s_topic_config_add[128] = {0};
+static char s_topic_config_remove[128] = {0};
+static char s_topic_config_list[128] = {0};
+static char s_topic_pairing_set[128] = {0};
 
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
                                int32_t event_id, void *event_data)
@@ -21,9 +29,17 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         case MQTT_EVENT_CONNECTED:
             ESP_LOGI(TAG, "Connected to MQTT broker");
             s_is_connected = true;
+
             // Subscribe to scan request topic
-            esp_mqtt_client_subscribe(s_mqtt_client, CONFIG_MQTT_TOPIC_SCAN_REQUEST, 1);
-            ESP_LOGI(TAG, "Subscribed to: %s", CONFIG_MQTT_TOPIC_SCAN_REQUEST);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_scan_request, 1);
+            ESP_LOGI(TAG, "Subscribed to: %s", s_topic_scan_request);
+
+            // Subscribe to config topics
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_config_add, 1);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_config_remove, 1);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_config_list, 1);
+            esp_mqtt_client_subscribe(s_mqtt_client, s_topic_pairing_set, 1);
+            ESP_LOGI(TAG, "Subscribed to config topics");
             break;
 
         case MQTT_EVENT_DISCONNECTED:
@@ -32,19 +48,66 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             break;
 
         case MQTT_EVENT_SUBSCRIBED:
-            ESP_LOGI(TAG, "Subscribed, msg_id=%d", event->msg_id);
+            ESP_LOGD(TAG, "Subscribed, msg_id=%d", event->msg_id);
             break;
 
-        case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "Received message on topic: %.*s", event->topic_len, event->topic);
+        case MQTT_EVENT_DATA: {
+            // Null-terminate topic and data for string operations
+            char topic[128] = {0};
+            char data[256] = {0};
+
+            int topic_len = event->topic_len < sizeof(topic) - 1 ? event->topic_len : sizeof(topic) - 1;
+            int data_len = event->data_len < sizeof(data) - 1 ? event->data_len : sizeof(data) - 1;
+
+            strncpy(topic, event->topic, topic_len);
+            strncpy(data, event->data, data_len);
+
+            ESP_LOGI(TAG, "Received: %s -> %s", topic, data);
+
             // Check if it's a scan request
-            if (strncmp(event->topic, CONFIG_MQTT_TOPIC_SCAN_REQUEST, event->topic_len) == 0) {
+            if (strcmp(topic, s_topic_scan_request) == 0) {
                 ESP_LOGI(TAG, "Scan request received!");
                 if (s_scan_callback) {
                     s_scan_callback();
                 }
             }
+            // Check if it's a config add command
+            else if (strcmp(topic, s_topic_config_add) == 0) {
+                // Expected format: "MAC,name" e.g., "AA:BB:CC:DD:EE:FF,phone_name"
+                char *comma = strchr(data, ',');
+                if (comma && s_config_callback) {
+                    *comma = '\0';
+                    char *mac = data;
+                    char *name = comma + 1;
+                    ESP_LOGI(TAG, "Config ADD: MAC=%s, Name=%s", mac, name);
+                    s_config_callback("add", mac, name);
+                }
+            }
+            // Check if it's a config remove command
+            else if (strcmp(topic, s_topic_config_remove) == 0) {
+                // Expected format: "MAC" or "name"
+                ESP_LOGI(TAG, "Config REMOVE: %s", data);
+                if (s_config_callback) {
+                    s_config_callback("remove", data, data);
+                }
+            }
+            // Check if it's a config list request
+            else if (strcmp(topic, s_topic_config_list) == 0) {
+                ESP_LOGI(TAG, "Config LIST request");
+                if (s_config_callback) {
+                    s_config_callback("list", "", "");
+                }
+            }
+            // Check if it's a pairing mode command
+            else if (strcmp(topic, s_topic_pairing_set) == 0) {
+                // Expected format: "on" or "off"
+                ESP_LOGI(TAG, "Pairing mode: %s", data);
+                if (s_config_callback) {
+                    s_config_callback("pairing", data, "");
+                }
+            }
             break;
+        }
 
         case MQTT_EVENT_ERROR:
             ESP_LOGE(TAG, "MQTT error occurred");
@@ -59,9 +122,35 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
     }
 }
 
-esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb)
+esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, const char *esp32_mac)
 {
     s_scan_callback = scan_cb;
+    s_config_callback = config_cb;
+
+    // Store ESP32 MAC (convert to format without colons for topic)
+    strncpy(s_esp32_mac, esp32_mac, sizeof(s_esp32_mac) - 1);
+
+    // Create MAC without colons for topic
+    char mac_no_colons[13] = {0};
+    int j = 0;
+    for (int i = 0; esp32_mac[i] && j < 12; i++) {
+        if (esp32_mac[i] != ':') {
+            mac_no_colons[j++] = esp32_mac[i];
+        }
+    }
+
+    // Build topic prefix: home/presence/XXXXXXXXXXXX
+    snprintf(s_topic_prefix, sizeof(s_topic_prefix), "%s/%s",
+             CONFIG_MQTT_TOPIC_PRESENCE_BASE, mac_no_colons);
+
+    // Build specific topics
+    snprintf(s_topic_scan_request, sizeof(s_topic_scan_request), "%s/scan/request", s_topic_prefix);
+    snprintf(s_topic_config_add, sizeof(s_topic_config_add), "%s/config/add", s_topic_prefix);
+    snprintf(s_topic_config_remove, sizeof(s_topic_config_remove), "%s/config/remove", s_topic_prefix);
+    snprintf(s_topic_config_list, sizeof(s_topic_config_list), "%s/config/list", s_topic_prefix);
+    snprintf(s_topic_pairing_set, sizeof(s_topic_pairing_set), "%s/pairing/set", s_topic_prefix);
+
+    ESP_LOGI(TAG, "Topic prefix: %s", s_topic_prefix);
 
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = CONFIG_MQTT_BROKER_URI,
@@ -92,27 +181,19 @@ esp_err_t mqtt_publish_presence(const char *device_name, bool present, const cha
     }
 
     char topic[128];
-    char payload[256];
+    const char *payload = present ? "home" : "not_home";
 
-    // Get timestamp
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    long timestamp = tv.tv_sec;
+    // Topic: home/presence/<ESP32_MAC>/<device_name>/state
+    snprintf(topic, sizeof(topic), "%s/%s/state", s_topic_prefix, device_name);
 
-    snprintf(topic, sizeof(topic), "%s/%s/state", CONFIG_MQTT_TOPIC_PRESENCE_BASE, device_name);
-    snprintf(payload, sizeof(payload),
-             "{\"state\":\"%s\",\"ts\":%ld,\"reason\":\"%s\"}",
-             present ? "present" : "absent",
-             timestamp,
-             reason);
-
-    int msg_id = esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 1, 0);
+    // Publish with retain so Home Assistant gets last known state
+    int msg_id = esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 1, 1);
     if (msg_id < 0) {
         ESP_LOGE(TAG, "Failed to publish to %s", topic);
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Published to %s: %s", topic, payload);
+    ESP_LOGI(TAG, "Published to %s: %s (reason: %s)", topic, payload, reason);
     return ESP_OK;
 }
 
@@ -123,7 +204,7 @@ esp_err_t mqtt_publish_scan_status(const char *status)
     }
 
     char topic[128];
-    snprintf(topic, sizeof(topic), "%s/scan/status", CONFIG_MQTT_TOPIC_PRESENCE_BASE);
+    snprintf(topic, sizeof(topic), "%s/scan/status", s_topic_prefix);
 
     int msg_id = esp_mqtt_client_publish(s_mqtt_client, topic, status, 0, 1, 0);
     if (msg_id < 0) {
@@ -134,7 +215,45 @@ esp_err_t mqtt_publish_scan_status(const char *status)
     return ESP_OK;
 }
 
+esp_err_t mqtt_publish_config(const char *devices_json)
+{
+    if (!s_is_connected || !s_mqtt_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/config/devices", s_topic_prefix);
+
+    // Publish with retain so config persists
+    int msg_id = esp_mqtt_client_publish(s_mqtt_client, topic, devices_json, 0, 1, 1);
+    if (msg_id < 0) {
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Published config: %s", devices_json);
+    return ESP_OK;
+}
+
 bool mqtt_is_connected(void)
 {
     return s_is_connected;
+}
+
+esp_err_t mqtt_publish_pairing_status(bool enabled)
+{
+    if (!s_is_connected || !s_mqtt_client) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "%s/pairing/status", s_topic_prefix);
+
+    const char *payload = enabled ? "on" : "off";
+    int msg_id = esp_mqtt_client_publish(s_mqtt_client, topic, payload, 0, 1, 1);
+    if (msg_id < 0) {
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Pairing status: %s", payload);
+    return ESP_OK;
 }

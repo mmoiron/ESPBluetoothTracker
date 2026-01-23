@@ -4,6 +4,8 @@
 #include "esp_bt_device.h"
 #include "esp_gap_bt_api.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -11,15 +13,14 @@
 #include <stdio.h>
 
 static const char *TAG = "BT_PRESENCE";
-
-#define MAX_DEVICES 2
+static const char *NVS_NAMESPACE = "bt_presence";
 
 static bt_device_t s_devices[MAX_DEVICES];
-static int s_num_devices = 0;
 static int s_current_device_idx = -1;
 static bt_presence_result_cb_t s_result_callback = NULL;
 static SemaphoreHandle_t s_scan_semaphore = NULL;
 static bool s_scan_in_progress = false;
+static char s_local_mac[18] = {0};
 
 // Forward declarations
 static void bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param);
@@ -45,28 +46,30 @@ esp_err_t bt_parse_mac(const char *mac_str, uint8_t *mac_bytes)
     return ESP_OK;
 }
 
-static bool is_valid_mac(const uint8_t *mac)
+static void mac_to_string(const uint8_t *mac, char *str)
 {
-    // Check if MAC is all zeros
-    for (int i = 0; i < 6; i++) {
-        if (mac[i] != 0) {
-            return true;
-        }
+    sprintf(str, "%02X:%02X:%02X:%02X:%02X:%02X",
+            mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+esp_err_t bt_get_local_mac(char *mac_str)
+{
+    if (mac_str == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
-    return false;
+    strncpy(mac_str, s_local_mac, 18);
+    return ESP_OK;
 }
 
 static void bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *param)
 {
     switch (event) {
         case ESP_BT_GAP_DISC_RES_EVT:
-            // Device discovered during inquiry (pairing mode)
             ESP_LOGI(TAG, "Device discovered: %02x:%02x:%02x:%02x:%02x:%02x",
                      param->disc_res.bda[0], param->disc_res.bda[1],
                      param->disc_res.bda[2], param->disc_res.bda[3],
                      param->disc_res.bda[4], param->disc_res.bda[5]);
 
-            // Print device name if available
             for (int i = 0; i < param->disc_res.num_prop; i++) {
                 if (param->disc_res.prop[i].type == ESP_BT_GAP_DEV_PROP_BDNAME) {
                     char name[64] = {0};
@@ -85,8 +88,7 @@ static void bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *
             break;
 
         case ESP_BT_GAP_READ_REMOTE_NAME_EVT:
-            // Name request result - lightweight presence detection
-            if (s_current_device_idx >= 0 && s_current_device_idx < s_num_devices) {
+            if (s_current_device_idx >= 0 && s_current_device_idx < MAX_DEVICES) {
                 bt_device_t *dev = &s_devices[s_current_device_idx];
 
                 if (param->read_rmt_name.stat == ESP_BT_STATUS_SUCCESS) {
@@ -101,12 +103,10 @@ static void bt_gap_callback(esp_bt_gap_cb_event_t event, esp_bt_gap_cb_param_t *
                     strncpy(dev->reason, "name_failed", sizeof(dev->reason) - 1);
                 }
 
-                // Notify callback
                 if (s_result_callback) {
                     s_result_callback(dev);
                 }
 
-                // Signal completion
                 if (s_scan_semaphore) {
                     xSemaphoreGive(s_scan_semaphore);
                 }
@@ -161,6 +161,9 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
         return ESP_ERR_NO_MEM;
     }
 
+    // Initialize all device slots as unconfigured
+    memset(s_devices, 0, sizeof(s_devices));
+
     // Release memory for BLE (we only use Classic)
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_BLE));
 
@@ -190,6 +193,13 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
         return ret;
     }
 
+    // Get and store local MAC address
+    const uint8_t *local_mac = esp_bt_dev_get_address();
+    if (local_mac) {
+        mac_to_string(local_mac, s_local_mac);
+        ESP_LOGI(TAG, "ESP32 Bluetooth MAC: %s", s_local_mac);
+    }
+
     // Register GAP callback
     ret = esp_bt_gap_register_callback(bt_gap_callback);
     if (ret) {
@@ -198,51 +208,51 @@ esp_err_t bt_presence_init(bt_presence_result_cb_t result_cb)
     }
 
     // Set device name
-    esp_bt_dev_set_device_name("ESP32_Presence");
+    esp_bt_gap_set_device_name("ESP32_Presence");
 
     // Set SSP (Secure Simple Pairing) mode
     esp_bt_sp_param_t param_type = ESP_BT_SP_IOCAP_MODE;
-    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE; // No input/output for auto-pairing
+    esp_bt_io_cap_t iocap = ESP_BT_IO_CAP_NONE;
     esp_bt_gap_set_security_param(param_type, &iocap, sizeof(uint8_t));
 
-    // Configure devices from Kconfig
-    s_num_devices = 0;
+    // Load configuration from NVS
+    bt_presence_load_config();
 
-    // Device 1
-    if (bt_parse_mac(CONFIG_BT_DEVICE1_MAC, s_devices[0].mac) == ESP_OK &&
-        is_valid_mac(s_devices[0].mac)) {
-        strncpy(s_devices[0].name, CONFIG_BT_DEVICE1_NAME, sizeof(s_devices[0].name) - 1);
-        s_devices[0].present = false;
-        s_num_devices++;
-        ESP_LOGI(TAG, "Device 1 configured: %s (%02x:%02x:%02x:%02x:%02x:%02x)",
-                 s_devices[0].name,
-                 s_devices[0].mac[0], s_devices[0].mac[1], s_devices[0].mac[2],
-                 s_devices[0].mac[3], s_devices[0].mac[4], s_devices[0].mac[5]);
+    // If no devices loaded from NVS, try to load from Kconfig defaults
+    if (bt_presence_get_device_count() == 0) {
+        ESP_LOGI(TAG, "No devices in NVS, loading from Kconfig defaults...");
+
+        #ifdef CONFIG_BT_DEVICE1_MAC
+        if (strlen(CONFIG_BT_DEVICE1_MAC) > 0 && strcmp(CONFIG_BT_DEVICE1_MAC, "00:00:00:00:00:00") != 0) {
+            bt_presence_add_device(CONFIG_BT_DEVICE1_MAC, CONFIG_BT_DEVICE1_NAME);
+        }
+        #endif
+
+        #ifdef CONFIG_BT_DEVICE2_MAC
+        if (strlen(CONFIG_BT_DEVICE2_MAC) > 0 && strcmp(CONFIG_BT_DEVICE2_MAC, "00:00:00:00:00:00") != 0) {
+            bt_presence_add_device(CONFIG_BT_DEVICE2_MAC, CONFIG_BT_DEVICE2_NAME);
+        }
+        #endif
+
+        #ifdef CONFIG_BT_DEVICE3_MAC
+        if (strlen(CONFIG_BT_DEVICE3_MAC) > 0 && strcmp(CONFIG_BT_DEVICE3_MAC, "00:00:00:00:00:00") != 0) {
+            bt_presence_add_device(CONFIG_BT_DEVICE3_MAC, CONFIG_BT_DEVICE3_NAME);
+        }
+        #endif
+
+        // Save loaded defaults to NVS
+        if (bt_presence_get_device_count() > 0) {
+            bt_presence_save_config();
+        }
     }
 
-    // Device 2
-    if (bt_parse_mac(CONFIG_BT_DEVICE2_MAC, s_devices[1].mac) == ESP_OK &&
-        is_valid_mac(s_devices[1].mac)) {
-        strncpy(s_devices[1].name, CONFIG_BT_DEVICE2_NAME, sizeof(s_devices[1].name) - 1);
-        s_devices[1].present = false;
-        s_num_devices++;
-        ESP_LOGI(TAG, "Device 2 configured: %s (%02x:%02x:%02x:%02x:%02x:%02x)",
-                 s_devices[1].name,
-                 s_devices[1].mac[0], s_devices[1].mac[1], s_devices[1].mac[2],
-                 s_devices[1].mac[3], s_devices[1].mac[4], s_devices[1].mac[5]);
-    }
-
-    if (s_num_devices == 0) {
-        ESP_LOGW(TAG, "No valid devices configured! Use menuconfig to set MAC addresses.");
-    }
-
-    ESP_LOGI(TAG, "Bluetooth initialized with %d device(s)", s_num_devices);
+    ESP_LOGI(TAG, "Bluetooth initialized with %d device(s)", bt_presence_get_device_count());
     return ESP_OK;
 }
 
 static void probe_device(int device_idx)
 {
-    if (device_idx < 0 || device_idx >= s_num_devices) {
+    if (device_idx < 0 || device_idx >= MAX_DEVICES || !s_devices[device_idx].configured) {
         return;
     }
 
@@ -254,10 +264,8 @@ static void probe_device(int device_idx)
              dev->mac[0], dev->mac[1], dev->mac[2],
              dev->mac[3], dev->mac[4], dev->mac[5]);
 
-    // Clear semaphore before starting
     xSemaphoreTake(s_scan_semaphore, 0);
 
-    // Start Name Request (lighter than SDP, works better with phones in standby)
     esp_err_t ret = esp_bt_gap_read_remote_name((uint8_t *)dev->mac);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start name request: %s", esp_err_to_name(ret));
@@ -269,7 +277,6 @@ static void probe_device(int device_idx)
         return;
     }
 
-    // Wait for result with timeout
     if (xSemaphoreTake(s_scan_semaphore, pdMS_TO_TICKS(CONFIG_BT_PROBE_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "Device %s: Name request timeout", dev->name);
         dev->present = false;
@@ -287,19 +294,18 @@ esp_err_t bt_presence_scan(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (s_num_devices == 0) {
+    int device_count = bt_presence_get_device_count();
+    if (device_count == 0) {
         ESP_LOGW(TAG, "No devices configured for scanning");
         return ESP_ERR_INVALID_STATE;
     }
 
     s_scan_in_progress = true;
-    ESP_LOGI(TAG, "Starting presence scan for %d device(s)...", s_num_devices);
+    ESP_LOGI(TAG, "Starting presence scan for %d device(s)...", device_count);
 
-    for (int i = 0; i < s_num_devices; i++) {
-        probe_device(i);
-
-        // Delay between devices
-        if (i < s_num_devices - 1) {
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (s_devices[i].configured) {
+            probe_device(i);
             vTaskDelay(pdMS_TO_TICKS(CONFIG_BT_INTER_DEVICE_DELAY_MS));
         }
     }
@@ -311,31 +317,207 @@ esp_err_t bt_presence_scan(void)
     return ESP_OK;
 }
 
+esp_err_t bt_presence_add_device(const char *mac_str, const char *name)
+{
+    if (mac_str == NULL || name == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Check if device already exists
+    uint8_t new_mac[6];
+    if (bt_parse_mac(mac_str, new_mac) != ESP_OK) {
+        ESP_LOGE(TAG, "Invalid MAC address: %s", mac_str);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (s_devices[i].configured && memcmp(s_devices[i].mac, new_mac, 6) == 0) {
+            ESP_LOGW(TAG, "Device already exists: %s", mac_str);
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+
+    // Find empty slot
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (!s_devices[i].configured) {
+            memcpy(s_devices[i].mac, new_mac, 6);
+            strncpy(s_devices[i].name, name, sizeof(s_devices[i].name) - 1);
+            s_devices[i].present = false;
+            s_devices[i].configured = true;
+            s_devices[i].reason[0] = '\0';
+
+            ESP_LOGI(TAG, "Added device %d: %s (%s)", i, name, mac_str);
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGE(TAG, "No empty slots available (max %d devices)", MAX_DEVICES);
+    return ESP_ERR_NO_MEM;
+}
+
+esp_err_t bt_presence_remove_device(const char *identifier)
+{
+    if (identifier == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    // Try to match by MAC
+    uint8_t mac[6];
+    bool is_mac = (bt_parse_mac(identifier, mac) == ESP_OK);
+
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (!s_devices[i].configured) continue;
+
+        bool match = false;
+        if (is_mac) {
+            match = (memcmp(s_devices[i].mac, mac, 6) == 0);
+        } else {
+            match = (strcmp(s_devices[i].name, identifier) == 0);
+        }
+
+        if (match) {
+            ESP_LOGI(TAG, "Removed device %d: %s", i, s_devices[i].name);
+            memset(&s_devices[i], 0, sizeof(bt_device_t));
+            return ESP_OK;
+        }
+    }
+
+    ESP_LOGW(TAG, "Device not found: %s", identifier);
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t bt_presence_save_config(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Save number of configured devices
+    int count = bt_presence_get_device_count();
+    nvs_set_i32(nvs, "dev_count", count);
+
+    // Save each device
+    int saved = 0;
+    for (int i = 0; i < MAX_DEVICES && saved < count; i++) {
+        if (!s_devices[i].configured) continue;
+
+        char key_mac[24], key_name[24];
+        char mac_str[18];
+
+        snprintf(key_mac, sizeof(key_mac), "dev%d_mac", saved);
+        snprintf(key_name, sizeof(key_name), "dev%d_name", saved);
+
+        mac_to_string(s_devices[i].mac, mac_str);
+
+        nvs_set_str(nvs, key_mac, mac_str);
+        nvs_set_str(nvs, key_name, s_devices[i].name);
+
+        saved++;
+    }
+
+    ret = nvs_commit(nvs);
+    nvs_close(nvs);
+
+    ESP_LOGI(TAG, "Saved %d devices to NVS", saved);
+    return ret;
+}
+
+esp_err_t bt_presence_load_config(void)
+{
+    nvs_handle_t nvs;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs);
+    if (ret == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved config in NVS");
+        return ESP_OK;
+    }
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    int32_t count = 0;
+    ret = nvs_get_i32(nvs, "dev_count", &count);
+    if (ret != ESP_OK || count <= 0) {
+        nvs_close(nvs);
+        return ESP_OK;
+    }
+
+    // Clear current devices
+    memset(s_devices, 0, sizeof(s_devices));
+
+    // Load each device
+    for (int i = 0; i < count && i < MAX_DEVICES; i++) {
+        char key_mac[24], key_name[24];
+        char mac_str[18] = {0};
+        char name[32] = {0};
+        size_t mac_len = sizeof(mac_str);
+        size_t name_len = sizeof(name);
+
+        snprintf(key_mac, sizeof(key_mac), "dev%d_mac", i);
+        snprintf(key_name, sizeof(key_name), "dev%d_name", i);
+
+        if (nvs_get_str(nvs, key_mac, mac_str, &mac_len) == ESP_OK &&
+            nvs_get_str(nvs, key_name, name, &name_len) == ESP_OK) {
+            bt_presence_add_device(mac_str, name);
+        }
+    }
+
+    nvs_close(nvs);
+    ESP_LOGI(TAG, "Loaded %d devices from NVS", bt_presence_get_device_count());
+    return ESP_OK;
+}
+
+esp_err_t bt_presence_get_config_json(char *buffer, size_t buffer_size)
+{
+    if (buffer == NULL || buffer_size < 64) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    int offset = snprintf(buffer, buffer_size, "[");
+
+    bool first = true;
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (!s_devices[i].configured) continue;
+
+        char mac_str[18];
+        mac_to_string(s_devices[i].mac, mac_str);
+
+        offset += snprintf(buffer + offset, buffer_size - offset,
+                          "%s{\"mac\":\"%s\",\"name\":\"%s\"}",
+                          first ? "" : ",",
+                          mac_str, s_devices[i].name);
+        first = false;
+    }
+
+    snprintf(buffer + offset, buffer_size - offset, "]");
+    return ESP_OK;
+}
+
+int bt_presence_get_device_count(void)
+{
+    int count = 0;
+    for (int i = 0; i < MAX_DEVICES; i++) {
+        if (s_devices[i].configured) count++;
+    }
+    return count;
+}
+
 esp_err_t bt_presence_enable_pairing(void)
 {
     ESP_LOGI(TAG, "Enabling pairing mode...");
-
-    // Make device discoverable and connectable
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_GENERAL_DISCOVERABLE);
-
     ESP_LOGI(TAG, "ESP32 is now discoverable as 'ESP32_Presence'");
-    ESP_LOGI(TAG, "Open Bluetooth settings on your phone and pair with this device");
-
-    // Start discovery to show nearby devices
     esp_bt_gap_start_discovery(ESP_BT_INQ_MODE_GENERAL_INQUIRY, 30, 0);
-
     return ESP_OK;
 }
 
 esp_err_t bt_presence_disable_pairing(void)
 {
     ESP_LOGI(TAG, "Disabling pairing mode...");
-
-    // Stop discovery
     esp_bt_gap_cancel_discovery();
-
-    // Make device non-discoverable but still connectable
     esp_bt_gap_set_scan_mode(ESP_BT_CONNECTABLE, ESP_BT_NON_DISCOVERABLE);
-
     return ESP_OK;
 }
