@@ -42,7 +42,7 @@ Known security limitations:
 
 All topics use the prefix: `home/presence/<ESP32_MAC>/`
 
-Where `<ESP32_MAC>` is the ESP32's Bluetooth MAC address without colons (e.g., `7C9EBDF54A56`).
+Where `<ESP32_MAC>` is the ESP32's Bluetooth MAC address without colons (e.g., `AABBCCDDEEFF`).
 
 ### Scanning
 
@@ -56,14 +56,14 @@ Where `<ESP32_MAC>` is the ESP32's Bluetooth MAC address without colons (e.g., `
 
 | Topic | Direction | Payload | Description |
 |-------|-----------|---------|-------------|
-| `.../config/add` | Subscribe | `MAC,name` | Add a device (e.g., `A4:75:B9:53:F7:ED,phone_cristina`) |
+| `.../config/add` | Subscribe | `MAC,name` | Add a device (e.g., `AA:BB:CC:DD:EE:FF,my_phone`) |
 | `.../config/remove` | Subscribe | `MAC` or `name` | Remove a device by MAC or name |
 | `.../config/list` | Subscribe | any | Request current device list |
 | `.../config/devices` | Publish | JSON array | Current device configuration (retained) |
 
 **Device list JSON format:**
 ```json
-[{"mac":"A4:75:B9:53:F7:ED","name":"cristina_phone"},{"mac":"9C:83:06:7B:27:17","name":"marco_phone"}]
+[{"mac":"AA:BB:CC:DD:EE:FF","name":"phone_1"},{"mac":"11:22:33:44:55:66","name":"phone_2"}]
 ```
 
 ### Pairing
@@ -98,7 +98,7 @@ When the ESP32 is flashed without WiFi configuration (or after a `reprovision` c
 3. **Open a browser** and go to `http://192.168.4.1`
 4. **Enter your settings**:
    - WiFi network name (SSID) and password
-   - MQTT broker URI (e.g., `mqtt://192.168.1.92:1883`)
+   - MQTT broker URI (e.g., `mqtt://192.168.1.100:1883`)
    - MQTT username and password
 5. **Click Save** - the device will restart and connect to your network
 
@@ -114,7 +114,7 @@ The device will clear its configuration and restart in provisioning mode.
 
 ## Command Reference
 
-Replace `<ESP32_MAC>` with your ESP32's Bluetooth MAC (e.g., `7C9EBDF54A56`).
+Replace `<ESP32_MAC>` with your ESP32's Bluetooth MAC (e.g., `AABBCCDDEEFF`).
 Replace `<BROKER>`, `<USER>`, `<PASS>` with your MQTT broker details.
 
 ### 1. List configured phones
@@ -155,9 +155,12 @@ mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/syst
 
 ## Complete Workflow: Add a New Phone
 
+Replace `<BROKER>`, `<USER>`, `<PASS>` with your MQTT broker details.
+Replace `<ESP32_MAC>` with your ESP32's Bluetooth MAC (e.g., `AABBCCDDEEFF`).
+
 ### Step 1: Enable pairing mode
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/pairing/set" -m "on"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/pairing/set" -m "on"
 ```
 
 ### Step 2: Pair the phone
@@ -168,34 +171,34 @@ Check the ESP32 serial output for the phone's Bluetooth MAC address.
 
 ### Step 4: Disable pairing mode
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/pairing/set" -m "off"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/pairing/set" -m "off"
 ```
 
 ### Step 5: Add the phone to tracking list
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/config/add" -m "9C:83:06:7B:27:17,marco_phone"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/config/add" -m "AA:BB:CC:DD:EE:FF,my_phone"
 ```
 
 ### Step 6: Verify configuration
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/config/list" -m "1"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/config/list" -m "1"
 ```
 
 ### Step 7: Test presence detection
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/scan/request" -m "1"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/scan/request" -m "1"
 ```
 
 ## Complete Workflow: Remove a Phone
 
 ### Step 1: Remove from tracking list
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/config/remove" -m "marco_phone"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/config/remove" -m "my_phone"
 ```
 
 ### Step 2: Verify removal
 ```bash
-mosquitto_pub -h 192.168.1.92 -u mqttuser -P mqttpassword -t "home/presence/7C9EBDF54A56/config/list" -m "1"
+mosquitto_pub -h <BROKER> -u <USER> -P <PASS> -t "home/presence/<ESP32_MAC>/config/list" -m "1"
 ```
 
 ### Step 3: (Optional) Unpair from phone
@@ -205,17 +208,19 @@ On the phone: **Settings** → **Bluetooth** → **ESP32_Presence_XXXX** → **F
 
 ### Binary Sensor Configuration
 
+Replace `<ESP32_MAC>` with your ESP32's Bluetooth MAC (e.g., `AABBCCDDEEFF`).
+
 ```yaml
 mqtt:
   binary_sensor:
-    - name: "Cristina Phone"
-      state_topic: "home/presence/7C9EBDF54A56/cristina_phone/state"
+    - name: "Phone 1"
+      state_topic: "home/presence/<ESP32_MAC>/phone_1/state"
       payload_on: "home"
       payload_off: "not_home"
       device_class: presence
 
-    - name: "Marco Phone"
-      state_topic: "home/presence/7C9EBDF54A56/marco_phone/state"
+    - name: "Phone 2"
+      state_topic: "home/presence/<ESP32_MAC>/phone_2/state"
       payload_on: "home"
       payload_off: "not_home"
       device_class: presence
@@ -232,7 +237,7 @@ automation:
     action:
       - service: mqtt.publish
         data:
-          topic: "home/presence/7C9EBDF54A56/scan/request"
+          topic: "home/presence/<ESP32_MAC>/scan/request"
           payload: "1"
 ```
 
