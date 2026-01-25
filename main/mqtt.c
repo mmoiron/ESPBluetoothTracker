@@ -12,7 +12,7 @@ static bool s_is_connected = false;
 static mqtt_scan_request_cb_t s_scan_callback = NULL;
 static mqtt_config_cb_t s_config_callback = NULL;
 static char s_esp32_mac[18] = {0};  // MAC address string "XX:XX:XX:XX:XX:XX"
-static char s_topic_prefix[64] = {0};  // "home/presence/XXXXXXXXXXXX"
+static char s_topic_prefix[80] = {0};  // "<topic_base>/XXXXXXXXXXXX" (64 + 1 + 12 + 1)
 
 // Topic suffixes
 static char s_topic_scan_request[128] = {0};
@@ -158,9 +158,28 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
         }
     }
 
-    // Build topic prefix: home/presence/XXXXXXXXXXXX
-    snprintf(s_topic_prefix, sizeof(s_topic_prefix), "%s/%s",
-             CONFIG_MQTT_TOPIC_PRESENCE_BASE, mac_no_colons);
+    // Load MQTT config - check provisioning first, then fallback to Kconfig
+    esp_mqtt_client_config_t mqtt_cfg = {0};
+    const char *topic_base = CONFIG_MQTT_TOPIC_PRESENCE_BASE;  // default
+
+    prov_config_t prov_config;
+    if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
+        ESP_LOGI(TAG, "Using provisioned MQTT config");
+        mqtt_cfg.broker.address.uri = prov_config.mqtt_uri;
+        mqtt_cfg.credentials.username = prov_config.mqtt_username;
+        mqtt_cfg.credentials.authentication.password = prov_config.mqtt_password;
+        topic_base = prov_config.mqtt_topic_base;
+        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", prov_config.mqtt_uri);
+    } else {
+        ESP_LOGI(TAG, "Using Kconfig default MQTT config");
+        mqtt_cfg.broker.address.uri = CONFIG_MQTT_BROKER_URI;
+        mqtt_cfg.credentials.username = CONFIG_MQTT_USERNAME;
+        mqtt_cfg.credentials.authentication.password = CONFIG_MQTT_PASSWORD;
+        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", CONFIG_MQTT_BROKER_URI);
+    }
+
+    // Build topic prefix: <topic_base>/XXXXXXXXXXXX
+    snprintf(s_topic_prefix, sizeof(s_topic_prefix), "%s/%s", topic_base, mac_no_colons);
 
     // Build specific topics
     snprintf(s_topic_scan_request, sizeof(s_topic_scan_request), "%s/scan/request", s_topic_prefix);
@@ -172,24 +191,6 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
     snprintf(s_topic_factory_reset, sizeof(s_topic_factory_reset), "%s/system/factory_reset", s_topic_prefix);
 
     ESP_LOGI(TAG, "Topic prefix: %s", s_topic_prefix);
-
-    // Load MQTT config - check provisioning first, then fallback to Kconfig
-    esp_mqtt_client_config_t mqtt_cfg = {0};
-
-    prov_config_t prov_config;
-    if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
-        ESP_LOGI(TAG, "Using provisioned MQTT config");
-        mqtt_cfg.broker.address.uri = prov_config.mqtt_uri;
-        mqtt_cfg.credentials.username = prov_config.mqtt_username;
-        mqtt_cfg.credentials.authentication.password = prov_config.mqtt_password;
-        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", prov_config.mqtt_uri);
-    } else {
-        ESP_LOGI(TAG, "Using Kconfig default MQTT config");
-        mqtt_cfg.broker.address.uri = CONFIG_MQTT_BROKER_URI;
-        mqtt_cfg.credentials.username = CONFIG_MQTT_USERNAME;
-        mqtt_cfg.credentials.authentication.password = CONFIG_MQTT_PASSWORD;
-        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", CONFIG_MQTT_BROKER_URI);
-    }
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     if (s_mqtt_client == NULL) {

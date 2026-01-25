@@ -79,6 +79,8 @@ static const char PROV_HTML_PAGE[] =
 "<input type='text' name='mqtt_user' maxlength='31'>"
 "<label>Password</label>"
 "<input type='password' name='mqtt_pass' maxlength='63'>"
+"<label>Topic Base</label>"
+"<input type='text' name='mqtt_topic' value='home/presence' maxlength='63'>"
 "</div>"
 "<button type='submit'>Save &amp; Connect</button>"
 "</form>"
@@ -150,6 +152,14 @@ esp_err_t prov_load_config(prov_config_t *config)
     len = sizeof(config->mqtt_password);
     nvs_get_str(nvs, "mqtt_pass", config->mqtt_password, &len);
 
+    len = sizeof(config->mqtt_topic_base);
+    nvs_get_str(nvs, "mqtt_topic", config->mqtt_topic_base, &len);
+
+    // Set default topic base if not configured
+    if (strlen(config->mqtt_topic_base) == 0) {
+        strncpy(config->mqtt_topic_base, "home/presence", sizeof(config->mqtt_topic_base));
+    }
+
     // Load static IP settings
     uint8_t use_static = 0;
     nvs_get_u8(nvs, "use_static", &use_static);
@@ -200,6 +210,7 @@ esp_err_t prov_save_config(const prov_config_t *config)
     nvs_set_str(nvs, "mqtt_uri", config->mqtt_uri);
     nvs_set_str(nvs, "mqtt_user", config->mqtt_username);
     nvs_set_str(nvs, "mqtt_pass", config->mqtt_password);
+    nvs_set_str(nvs, "mqtt_topic", config->mqtt_topic_base);
 
     // Save static IP settings (always save all keys to clear old data)
     nvs_set_u8(nvs, "use_static", config->use_static_ip ? 1 : 0);
@@ -410,6 +421,12 @@ static esp_err_t save_handler(httpd_req_t *req)
     parse_form_field(buf, "mqtt_uri", config.mqtt_uri, sizeof(config.mqtt_uri));
     parse_form_field(buf, "mqtt_user", config.mqtt_username, sizeof(config.mqtt_username));
     parse_form_field(buf, "mqtt_pass", config.mqtt_password, sizeof(config.mqtt_password));
+    parse_form_field(buf, "mqtt_topic", config.mqtt_topic_base, sizeof(config.mqtt_topic_base));
+
+    // Set default topic base if not provided
+    if (strlen(config.mqtt_topic_base) == 0) {
+        strncpy(config.mqtt_topic_base, "home/presence", sizeof(config.mqtt_topic_base));
+    }
 
     // Parse static IP fields
     char static_ip_enabled[8] = {0};

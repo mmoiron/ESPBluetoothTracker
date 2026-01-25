@@ -1,0 +1,15 @@
+{
+  "name": "ESP32 Bluetooth Presence Detector",
+  "version": "1.0.0",
+  "home_assistant_domain": "mqtt",
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "./firmware/bootloader.bin", "offset": 4096 },
+        { "path": "./firmware/partition-table.bin", "offset": 32768 },
+        { "path": "./firmware/bt_presence_detector.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}
