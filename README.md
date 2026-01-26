@@ -243,21 +243,59 @@ automation:
 
 ## Building and Flashing
 
-### Prerequisites
-- ESP-IDF v5.5.2
+### Option 1: Web Flasher (Easiest)
+
+No installation required! Flash directly from your browser:
+
+**https://mmoiron.github.io/ESPBluetoothTracker/**
+
+Requirements: Chrome/Edge browser, ESP32 connected via USB.
+
+### Option 2: Build from Source
+
+#### Prerequisites
+- [ESP-IDF v5.5.2](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
 - ESP32 development board
+- USB drivers (CP210x or CH340)
 
-### Build
+#### Build Scripts
+
+The project includes numbered batch scripts for Windows. Run them in order for first-time setup:
+
+| Script | Purpose | When to Use |
+|--------|---------|-------------|
+| `1_install_esp_idf.bat` | Install ESP-IDF tools | First time on new PC |
+| `2_build_first.bat` | Set target + build | First build after cloning |
+| `3_build.bat` | Incremental build | Daily development |
+| `4_flash.bat` | Flash + serial monitor | Upload to ESP32 |
+| `5_rebuild_clean.bat` | Full clean + rebuild | When builds fail |
+
+#### First-Time Setup (New PC)
+
 ```batch
-rebuild.bat
+1_install_esp_idf.bat   # Install ESP-IDF (once)
+2_build_first.bat       # First build (sets ESP32 target)
+4_flash.bat             # Flash to device
 ```
 
-### Flash
+#### Daily Development
+
 ```batch
-flash_project.bat
+3_build.bat             # Quick incremental build
+4_flash.bat             # Flash and monitor
 ```
 
-### Monitor Serial Output
+#### Troubleshooting Build Issues
+
+```batch
+5_rebuild_clean.bat     # Full clean rebuild
+```
+
+### Serial Monitor
+
+The `4_flash.bat` script automatically opens the serial monitor after flashing.
+
+To open monitor manually:
 ```batch
 idf.py -p COM3 monitor
 ```
