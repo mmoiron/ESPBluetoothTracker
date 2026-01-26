@@ -21,7 +21,7 @@ Detects the presence of Bluetooth Classic devices (phones) using ESP32 and publi
 
 Known security limitations:
 
-- **No TLS/SSL support** - MQTT connections use plain text (`mqtt://`), not encrypted (`mqtts://`)
+- **TLS/SSL supported** - Use `mqtts://` for encrypted connections (auto-detected from URI prefix)
 - **Provisioning portal uses HTTP** - WiFi and MQTT credentials are transmitted unencrypted during setup
 - **Open WiFi AP during provisioning** - The setup access point has no password protection
 - **Credentials stored unencrypted** - WiFi/MQTT passwords are stored in NVS without encryption

@@ -2,6 +2,7 @@
 #include "provisioning.h"
 #include "mqtt_client.h"
 #include "esp_log.h"
+#include "esp_crt_bundle.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -163,20 +164,32 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
     const char *topic_base = CONFIG_MQTT_TOPIC_PRESENCE_BASE;  // default
 
     prov_config_t prov_config;
+    const char *broker_uri = NULL;
+
     if (prov_is_provisioned() && prov_load_config(&prov_config) == ESP_OK) {
         ESP_LOGI(TAG, "Using provisioned MQTT config");
+        broker_uri = prov_config.mqtt_uri;
         mqtt_cfg.broker.address.uri = prov_config.mqtt_uri;
         mqtt_cfg.credentials.username = prov_config.mqtt_username;
         mqtt_cfg.credentials.authentication.password = prov_config.mqtt_password;
         topic_base = prov_config.mqtt_topic_base;
-        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", prov_config.mqtt_uri);
     } else {
         ESP_LOGI(TAG, "Using Kconfig default MQTT config");
+        broker_uri = CONFIG_MQTT_BROKER_URI;
         mqtt_cfg.broker.address.uri = CONFIG_MQTT_BROKER_URI;
         mqtt_cfg.credentials.username = CONFIG_MQTT_USERNAME;
         mqtt_cfg.credentials.authentication.password = CONFIG_MQTT_PASSWORD;
-        ESP_LOGI(TAG, "Connecting to MQTT broker: %s", CONFIG_MQTT_BROKER_URI);
     }
+
+    // Auto-detect TLS from URI prefix (mqtts://)
+    if (strncmp(broker_uri, "mqtts://", 8) == 0) {
+        ESP_LOGI(TAG, "TLS enabled (mqtts:// detected)");
+        mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+    } else {
+        ESP_LOGI(TAG, "TLS disabled (plain mqtt://)");
+    }
+
+    ESP_LOGI(TAG, "Connecting to MQTT broker: %s", broker_uri);
 
     // Build topic prefix: <topic_base>/XXXXXXXXXXXX
     snprintf(s_topic_prefix, sizeof(s_topic_prefix), "%s/%s", topic_base, mac_no_colons);
