@@ -14,8 +14,6 @@ static mqtt_scan_request_cb_t s_scan_callback = NULL;
 static mqtt_config_cb_t s_config_callback = NULL;
 static char s_esp32_mac[18] = {0};  // MAC address string "XX:XX:XX:XX:XX:XX"
 static char s_topic_prefix[80] = {0};  // "<topic_base>/XXXXXXXXXXXX" (64 + 1 + 12 + 1)
-static uint32_t s_reconnect_attempts = 0;
-static uint32_t s_total_disconnects = 0;
 
 // Topic suffixes
 static char s_topic_scan_request[128] = {0};
@@ -33,13 +31,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
 
     switch ((esp_mqtt_event_id_t)event_id) {
         case MQTT_EVENT_CONNECTED:
-            if (s_reconnect_attempts > 0) {
-                ESP_LOGI(TAG, "Reconnected to MQTT broker after %lu attempts", s_reconnect_attempts);
-            } else {
-                ESP_LOGI(TAG, "Connected to MQTT broker");
-            }
+            ESP_LOGI(TAG, "Connected to MQTT broker");
             s_is_connected = true;
-            s_reconnect_attempts = 0;
 
             // Subscribe to scan request topic
             esp_mqtt_client_subscribe(s_mqtt_client, s_topic_scan_request, 1);
@@ -56,11 +49,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
             break;
 
         case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "Disconnected from MQTT broker");
             s_is_connected = false;
-            s_total_disconnects++;
-            s_reconnect_attempts++;
-            ESP_LOGW(TAG, "Disconnected from MQTT broker (total disconnects: %lu, reconnect attempt: %lu)",
-                     s_total_disconnects, s_reconnect_attempts);
             break;
 
         case MQTT_EVENT_SUBSCRIBED:
@@ -140,14 +130,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base,
         }
 
         case MQTT_EVENT_ERROR:
-            ESP_LOGE(TAG, "MQTT error occurred (reconnect attempt: %lu)", s_reconnect_attempts);
+            ESP_LOGE(TAG, "MQTT error occurred");
             if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-                ESP_LOGE(TAG, "Transport error: %s (errno: %d)",
-                         strerror(event->error_handle->esp_transport_sock_errno),
-                         event->error_handle->esp_transport_sock_errno);
-            } else if (event->error_handle->error_type == MQTT_ERROR_TYPE_CONNECTION_REFUSED) {
-                ESP_LOGE(TAG, "Connection refused by broker (code: %d)",
-                         event->error_handle->connect_return_code);
+                ESP_LOGE(TAG, "Transport error: %s", strerror(event->error_handle->esp_transport_sock_errno));
             }
             break;
 
@@ -203,11 +188,6 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
     } else {
         ESP_LOGI(TAG, "TLS disabled (plain mqtt://)");
     }
-
-    // Configure reconnection behavior
-    mqtt_cfg.network.reconnect_timeout_ms = 5000;   // Wait 5 seconds between reconnect attempts
-    mqtt_cfg.network.timeout_ms = 10000;            // Connection timeout 10 seconds
-    mqtt_cfg.session.keepalive = 30;                // Keepalive ping every 30 seconds
 
     ESP_LOGI(TAG, "Connecting to MQTT broker: %s", broker_uri);
 
