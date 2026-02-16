@@ -19,6 +19,8 @@ static const char *TAG = "WIFI";
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
 static bool s_is_connected = false;
+static bool s_initial_connect_done = false;
+static uint32_t s_total_disconnects = 0;
 
 static void event_handler(void *arg, esp_event_base_t event_base,
                           int32_t event_id, void *event_data)
@@ -27,19 +29,37 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         s_is_connected = false;
-        if (s_retry_num < WIFI_MAX_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Retry connecting to AP (%d/%d)", s_retry_num, WIFI_MAX_RETRY);
+        s_total_disconnects++;
+        s_retry_num++;
+
+        if (!s_initial_connect_done) {
+            // During initial connection: give up after WIFI_MAX_RETRY to report failure
+            if (s_retry_num <= WIFI_MAX_RETRY) {
+                ESP_LOGI(TAG, "Retry connecting to AP (%d/%d)", s_retry_num, WIFI_MAX_RETRY);
+                esp_wifi_connect();
+            } else {
+                ESP_LOGE(TAG, "Failed to connect to AP after %d attempts", WIFI_MAX_RETRY);
+                xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
+            }
         } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-            ESP_LOGE(TAG, "Failed to connect to AP after %d attempts", WIFI_MAX_RETRY);
+            // After initial connection: always reconnect, never give up
+            ESP_LOGW(TAG, "WiFi disconnected (total: %lu, attempt: %d) - reconnecting...",
+                     s_total_disconnects, s_retry_num);
+            // Add a small delay before reconnecting to avoid rapid-fire retries
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_wifi_connect();
         }
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        if (s_initial_connect_done) {
+            ESP_LOGI(TAG, "WiFi reconnected! IP: " IPSTR " (after %d attempts)",
+                     IP2STR(&event->ip_info.ip), s_retry_num);
+        } else {
+            ESP_LOGI(TAG, "Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        }
         s_retry_num = 0;
         s_is_connected = true;
+        s_initial_connect_done = true;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }

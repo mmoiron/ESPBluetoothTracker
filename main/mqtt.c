@@ -189,6 +189,11 @@ esp_err_t mqtt_init(mqtt_scan_request_cb_t scan_cb, mqtt_config_cb_t config_cb, 
         ESP_LOGI(TAG, "TLS disabled (plain mqtt://)");
     }
 
+    // Configure reconnection behavior
+    mqtt_cfg.network.reconnect_timeout_ms = 5000;   // Wait 5 seconds between reconnect attempts
+    mqtt_cfg.network.timeout_ms = 10000;             // Connection timeout 10 seconds
+    mqtt_cfg.session.keepalive = 30;                 // Keepalive ping every 30 seconds
+
     ESP_LOGI(TAG, "Connecting to MQTT broker: %s", broker_uri);
 
     // Build topic prefix: <topic_base>/XXXXXXXXXXXX
